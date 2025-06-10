@@ -16,14 +16,8 @@ Thumbs.db
 # Ignore Python virtual environments
 /backend/.venv/
 
-# Ignore Python cache
-/backend/__pycache__/
-/backend/app/__pycache__/
-/backend/app/api/__pycache__/
-/backend/app/services/__pycache__/
-/backend/app/utils/__pycache__/
-
-# Ignore Python bytecode
+# Ignore Python cache & bytecode
+__pycache__/
 *.pyc
 
 # Ignore uploads/static
