@@ -1,0 +1,18 @@
+# Ignore Python virtual environments
+.venv/
+
+# Ignore Python cache & bytecode
+__pycache__/
+*.pyc
+
+# Ignore uploads/static
+static/
+
+# Ignore local environment/config files
+.env
+
+# Ignore egg-info (if any)
+*.egg-info
+
+# Ignore VSCode settings (optional)
+.vscode/
