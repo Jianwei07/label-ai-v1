@@ -1,0 +1,67 @@
+🚀 Prompt: AI-powered Regulatory Label Checker (Exact Match Verification)
+You are developing a web-based AI software solution designed specifically for precise regulatory label checking, addressing current pain points users face with manual checks or basic tools (such as screenshot-to-ChatGPT approaches, which lack clarity, precision, or reliability).
+
+Your software must achieve the following core functionality clearly and simply:
+
+🎯 1. User’s Intent:
+Users must explicitly declare their checking instructions clearly and simply. Examples:
+
+"Font height exactly 3mm."
+
+"Ingredient list must match provided content exactly."
+
+"Claims, product names, and ingredient lists must appear identically in English and Foreign languages."
+
+"Spacing must match provided reference exactly."
+
+The software must interpret and enforce these instructions precisely during label checking.
+
+🔍 2. Identify Potential Issues Clearly:
+Accurately scan uploaded label images using OCR (Tesseract OCR recommended).
+
+Check label content visually and textually against the exact provided instructions:
+
+Exact wording and translations (letter-for-letter).
+
+Precise spacing and punctuation.
+
+Font size measurements (e.g., exact 3mm must match visually via OpenCV).
+
+Barcode dimensions, placements, and overall visual correctness.
+
+The software should detect and flag both matches ("correct") and mismatches ("wrong") explicitly.
+
+📌 3. Highlight Issues Visually:
+Clearly highlight both correct and incorrect elements directly on the label visually using:
+
+Green bounding boxes: indicating exact match with user's instructions.
+
+Red bounding boxes: indicating any deviation or mismatch (spacing, wording, font size, barcode size, etc.).
+
+Interactive pop-up tooltips clearly describing what exactly is correct or wrong when highlighted elements are hovered or clicked.
+
+🎚️ 4. Sensitivity Adjustment (Optional but Recommended):
+Provide a slider (0-100) allowing users to customize the granularity of checking:
+
+Low: Essential wording and major layout issues.
+
+High: Extremely precise checking, detecting tiny visual deviations (e.g., even minor spacing inconsistencies).
+
+🛠️ Recommended Tech Stack (Free/Open-Source, Ideal for POC):
+Component	Recommended Tool	Purpose
+Frontend UI	NextJS (tailwindcss / Shadcn)	Image upload, display highlights
+Backend/API	FastAPI (Python)	Image processing, OCR, rule validation
+OCR	Tesseract OCR	Accurate text extraction
+Visual Checks	OpenCV	Spacing, font size, barcode visual analysis
+Rules Engine	YAML/JSON	User-defined instructions
+Database	SQLite	Store label checks and user feedback
+
+✅ Initial MVP Deliverables:
+React frontend: image upload, highlight annotations clearly indicating correct (green) and incorrect (red) label elements.
+
+FastAPI backend: OCR, exact-match checks against user-defined rules, visual verification logic (OpenCV).
+
+Simple rule definition format (JSON/YAML) for flexibility and clarity.
+
+SQLite setup for feedback and future enhancements.
+
