@@ -6,19 +6,43 @@ from fastapi.middleware.cors import CORSMiddleware
 
 # Correctly import from your project structure
 from app.core.config import settings
-from app.api.v1.labels import router as labels_router # Corrected import
-from app.api.v1.rules import router as rules_router # Corrected import
+from app.api.v1.labels import router as labels_router
+from app.api.v1.rules import router as rules_router
 from app.utils.custom_exceptions import CoreServiceError
+from app.db.session import database, engine # <-- ADDED: Import engine
+from app.models.analysis_result import metadata as analysis_metadata # <-- ADDED: Import metadata
 
 # Configure logging using settings from config.py
 logging.basicConfig(level=settings.LOG_LEVEL.upper())
 logger = logging.getLogger(settings.APP_NAME)
 
+# --- Define Startup and Shutdown Events as Functions ---
+async def startup_event():
+    """Connect to database and create tables on startup."""
+    try:
+        # Create the database table if it doesn't exist.
+        analysis_metadata.create_all(bind=engine)
+        await database.connect()
+        logger.info("Database connection established and tables created.")
+    except Exception as e:
+        logger.critical(f"Could not connect to database or create tables: {e}", exc_info=True)
+
+async def shutdown_event():
+    """Disconnect from database on shutdown."""
+    try:
+        await database.disconnect()
+        logger.info("Database connection closed.")
+    except Exception as e:
+        logger.error(f"Error disconnecting from database: {e}", exc_info=True)
+
+
+# --- UPDATED: FastAPI app with event handlers as functions ---
 app = FastAPI(
     title=settings.APP_NAME,
     version="0.1.0",
     description="API for checking regulatory compliance of product labels.",
-    # The interactive docs will be available at /docs and /redoc by default
+    on_startup=[startup_event],  # Use the function here
+    on_shutdown=[shutdown_event], # Use the function here
 )
 
 # --- Middleware ---
@@ -84,4 +108,3 @@ async def read_root():
 async def health_check():
     """Simple health check endpoint for monitoring."""
     return {"status": "healthy"}
-

@@ -16,20 +16,18 @@ class Settings(BaseSettings):
     UPLOADS_DIR: Path = BASE_DIR / "uploads"
     STATIC_SERVED_DIR: Path = BASE_DIR / "static_served" # For images with highlights, etc.
 
-    # Tesseract OCR Configuration (optional)
-    # If tesseract is not in your system's PATH, specify its command path here.
-    # Example for Linux: TESSERACT_PATH: str | None = "/usr/bin/tesseract"
-    # Example for Windows: TESSERACT_PATH: str | None = "C:/Program Files/Tesseract-OCR/tesseract.exe"
+    # --- ADDED: Database URL ---
+    # This defines the connection string for your database.
+    # For SQLite, it's the path to the database file.
+    DATABASE_URL: str = f"sqlite:///{BASE_DIR / 'label_checker.db'}"
+
+    # Tesseract OCR Configuration (optional, not currently used with EasyOCR)
     TESSERACT_PATH: str | None = None
 
     # Security (Example for simple API Key auth - to be used by app/core/security.py)
     # It's best practice to set sensitive values like API_KEY in your .env file
     # API_KEY: str = "your_secret_api_key_here_set_in_env_file"
     # API_KEY_NAME: str = "access_token" # The name of the header or query parameter for the API key
-
-    # Database URL (Example for SQLite, which is file-based)
-    # If you use PostgreSQL or another DB, the URL format will change.
-    # DATABASE_URL: str = f"sqlite:///{BASE_DIR / 'label_checker.db'}" # Example
 
     # Default DPI for image processing if not otherwise specified
     DEFAULT_IMAGE_DPI: int = 300
@@ -54,3 +52,4 @@ except OSError as e:
     # Handle potential permission errors or other issues during directory creation
     # You might want to log this error or raise a more specific ConfigurationError
     print(f"Warning: Could not create directories {settings.UPLOADS_DIR} or {settings.STATIC_SERVED_DIR}: {e}")
+
