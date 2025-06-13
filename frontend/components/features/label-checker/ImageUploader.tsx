@@ -7,6 +7,7 @@ import Image from "next/image";
 
 interface ImageUploaderProps {
   onFileSelect: (file: File) => void;
+  onFileRemove: () => void; // <-- Add this line
   currentImageUrl: string | null;
 }
 

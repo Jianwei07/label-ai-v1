@@ -5,12 +5,14 @@ import { HighlightedElement } from "@/lib/types";
 
 interface HighlightOverlayProps {
   highlights: HighlightedElement[];
-  imageElementId: string; // The ID of the <img> element
+  imageElementId: string;
+  focusedHighlight: HighlightedElement | null; // This prop receives the hovered fault
 }
 
 export function HighlightOverlay({
   highlights,
   imageElementId,
+  focusedHighlight,
 }: HighlightOverlayProps) {
   const [imageDimensions, setImageDimensions] = useState({
     naturalWidth: 0,
@@ -64,7 +66,7 @@ export function HighlightOverlay({
   return (
     <div
       ref={overlayRef}
-      className="absolute top-0 left-0"
+      className="absolute top-0 left-0 pointer-events-none" // Parent div should not capture pointer events
       style={{ width: `${renderedWidth}px`, height: `${renderedHeight}px` }}
     >
       {highlights.map((highlight, index) => {
@@ -78,17 +80,27 @@ export function HighlightOverlay({
           height: height * scale,
         };
 
-        const borderColor =
+        // --- FIX: Check if the current highlight is the one being focused ---
+        const isFocused =
+          focusedHighlight?.rule_id_ref === highlight.rule_id_ref;
+
+        // --- FIX: Dynamic styling based on status and focus state ---
+        const baseBorder = `border-2`;
+        const colorBorder =
           highlight.status === "correct"
             ? "border-green-500"
             : "border-red-500";
-        const bgColor =
+        const focusBorder = isFocused ? "!border-4 !border-yellow-400" : ""; // Use ! to override hover
+
+        const baseBg =
           highlight.status === "correct" ? "bg-green-500/20" : "bg-red-500/20";
+        const focusBg = isFocused ? "!bg-yellow-400/30" : "";
 
         return (
           <div
             key={index}
-            className={`absolute border-2 ${borderColor} ${bgColor} group pointer-events-auto transition-all duration-150 hover:!bg-transparent`}
+            // --- FIX: Combined all dynamic classes ---
+            className={`absolute group pointer-events-auto transition-all duration-150 ease-in-out hover:!bg-transparent ${baseBorder} ${colorBorder} ${focusBorder} ${baseBg} ${focusBg}`}
             style={{
               left: `${scaledBox.left}px`,
               top: `${scaledBox.top}px`,
@@ -96,8 +108,12 @@ export function HighlightOverlay({
               height: `${scaledBox.height}px`,
             }}
           >
-            {/* Tooltip that appears on hover */}
-            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max max-w-xs p-2 text-xs text-white bg-gray-900/80 dark:bg-gray-900 rounded-md shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+            {/* Tooltip that appears on hover OR when focused from the list */}
+            <div
+              className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max max-w-xs p-2 text-xs text-white bg-gray-900/80 dark:bg-gray-900 rounded-md shadow-lg transition-opacity pointer-events-none z-10 ${
+                isFocused ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+              }`}
+            >
               <p className="font-bold">{highlight.status.toUpperCase()}</p>
               <p>{highlight.message}</p>
               {highlight.found_value && (

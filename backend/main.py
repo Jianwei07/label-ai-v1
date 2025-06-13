@@ -1,5 +1,6 @@
 import logging
 from fastapi import FastAPI, Request, status
+from fastapi.staticfiles import StaticFiles
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -108,3 +109,8 @@ async def read_root():
 async def health_check():
     """Simple health check endpoint for monitoring."""
     return {"status": "healthy"}
+
+# --- ADDED: Mount the static files directory ---
+# This makes any file inside 'backend/static_served/' accessible via a URL.
+# e.g., a file at 'static_served/image.png' can be accessed at 'http://localhost:8000/static/image.png'
+app.mount("/static", StaticFiles(directory=settings.STATIC_SERVED_DIR), name="static")

@@ -6,6 +6,7 @@ import { FileText, CheckCircle2 } from "lucide-react";
 
 interface RulesUploaderProps {
   onFileSelect: (file: File) => void;
+  onFileRemove: () => void; // <-- Add this line
   currentFile: File | null;
 }
 

@@ -16,12 +16,14 @@ export interface HighlightedElement {
 }
 
 export interface LabelAnalysisResult {
-  analysis_id: string; // UUID is a string in TypeScript
+  analysis_id: string;
   original_filename: string;
   overall_status: "pass" | "fail_critical" | "fail_minor" | "processing_error";
-  summary: Record<string, any>; // A flexible object for summary stats
+  summary: Record<string, unknown>;
   highlights: HighlightedElement[];
-  timestamp: string; // ISO date string
+  timestamp: string;
+  // --- ADDED THIS FIELD ---
+  processed_image_url?: string | null; // The URL to the image with highlights
 }
 
 // Minimal type for the rule structure for now

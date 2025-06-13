@@ -54,27 +54,34 @@ async def process_label_analysis_sync(
             if condition.type == api_schemas.RuleType.EXACT_TEXT_MATCH:
                 found_match = False
                 if not condition.expected_text: continue
-
-                normalized_expected = text_utils.normalize_text(condition.expected_text, case_sensitive=False)
+                
+                # --- NEW: More robust text matching logic ---
+                # First, try to find a perfect match directly
                 for ocr_item in all_ocr_data:
-                    normalized_ocr = text_utils.normalize_text(ocr_item.text, case_sensitive=False)
-
-                    if normalized_expected in normalized_ocr:
-                        is_exact = text_utils.compare_text_exactly(ocr_item.text, condition.expected_text, case_sensitive=condition.case_sensitive)
-                        status = "correct" if is_exact else "wrong"
-                        message = f"Found expected text: '{condition.expected_text}'" if is_exact else f"Found similar text '{ocr_item.text}', but not an exact match."
-                        
+                    if text_utils.compare_text_exactly(ocr_item.text, condition.expected_text, case_sensitive=condition.case_sensitive):
                         highlights.append(api_schemas.HighlightedElement(
                             rule_id_ref=rule_id_ref,
                             bounding_box=api_schemas.BoundingBox(x=ocr_item.left, y=ocr_item.top, width=ocr_item.width, height=ocr_item.height),
-                            status=status,
-                            message=message,
-                            found_value=ocr_item.text,
-                            expected_value=condition.expected_text,
+                            status="correct", message=f"Found expected text: '{condition.expected_text}'",
+                            found_value=ocr_item.text, expected_value=condition.expected_text,
                         ))
-                        
-                        if is_exact: matches_count += 1
-                        else: mismatches_count += 1
+                        matches_count += 1
+                        found_match = True
+                        break
+                if found_match: continue
+
+                # If no perfect match, search for near matches to highlight as faults
+                normalized_expected = text_utils.normalize_text(condition.expected_text, case_sensitive=False)
+                for ocr_item in all_ocr_data:
+                    normalized_ocr = text_utils.normalize_text(ocr_item.text, case_sensitive=False)
+                    if normalized_expected in normalized_ocr or normalized_ocr in normalized_expected:
+                        highlights.append(api_schemas.HighlightedElement(
+                            rule_id_ref=rule_id_ref,
+                            bounding_box=api_schemas.BoundingBox(x=ocr_item.left, y=ocr_item.top, width=ocr_item.width, height=ocr_item.height),
+                            status="wrong", message=f"Found text '{ocr_item.text}', but not an exact match for '{condition.expected_text}'.",
+                            found_value=ocr_item.text, expected_value=condition.expected_text,
+                        ))
+                        mismatches_count += 1
                         found_match = True
                         break
                 
@@ -88,46 +95,44 @@ async def process_label_analysis_sync(
             elif condition.type == api_schemas.RuleType.BARCODE_DIMENSIONS:
                 if not detected_barcodes:
                     mismatches_count += 1
-                    faults_without_highlights.append("Barcode check failed: No barcodes detected on label.")
                     highlights.append(_create_generic_fault_highlight(rule_id_ref, "No barcode detected on label to check dimensions."))
                     continue
                 
-                barcode_to_check = next((bc for bc in detected_barcodes if bc.get("data") == condition.target_element_description), None)
+                # --- NEW: Logic to find the correct barcode number from the ruleset ---
+                # Find the corresponding text match rule to get the barcode number
+                barcode_number_rule = next((r for r in ruleset.conditions if r.type == api_schemas.RuleType.EXACT_TEXT_MATCH and r.target_element_description == condition.target_element_description), None)
+                
+                if not barcode_number_rule or not barcode_number_rule.expected_text:
+                    mismatches_count += 1
+                    highlights.append(_create_generic_fault_highlight(rule_id_ref, f"Could not find barcode number in rules for '{condition.target_element_description}'."))
+                    continue
+
+                barcode_number_to_find = barcode_number_rule.expected_text
+                barcode_to_check = next((bc for bc in detected_barcodes if bc.get("data") == barcode_number_to_find), None)
                 
                 if not barcode_to_check:
                     mismatches_count += 1
-                    fault_message = f"Could not find barcode with data '{condition.target_element_description}' to check its dimensions."
-                    faults_without_highlights.append(fault_message)
-                    highlights.append(_create_generic_fault_highlight(rule_id_ref, fault_message))
+                    highlights.append(_create_generic_fault_highlight(rule_id_ref, f"Could not find barcode with data '{barcode_number_to_find}' on the label."))
                     continue
 
-                width_ok = True
-                if condition.expected_width_mm is not None:
-                    width_ok = abs(barcode_to_check['measured_width_mm'] - condition.expected_width_mm) <= (condition.tolerance_mm or 0.5)
-
-                height_ok = True
-                if condition.expected_height_mm is not None:
-                    height_ok = abs(barcode_to_check['measured_height_mm'] - condition.expected_height_mm) <= (condition.tolerance_mm or 0.5)
+                width_ok = abs(barcode_to_check['measured_width_mm'] - (condition.expected_width_mm or 0)) <= (condition.tolerance_mm or 0.5) if condition.expected_width_mm is not None else True
+                height_ok = abs(barcode_to_check['measured_height_mm'] - (condition.expected_height_mm or 0)) <= (condition.tolerance_mm or 0.5) if condition.expected_height_mm is not None else True
                 
                 status = "correct" if width_ok and height_ok else "wrong"
                 if status == "correct": matches_count += 1
                 else: mismatches_count += 1
                 
-                message = f"Barcode ({barcode_to_check['data']}) dimensions are valid." if status == 'correct' else f"Barcode ({barcode_to_check['data']}) dimensions are invalid. Found: W={barcode_to_check['measured_width_mm']:.2f}mm, H={barcode_to_check['measured_height_mm']:.2f}mm"
+                message = f"Barcode ({barcode_to_check['data']}) dimensions are valid." if status == 'correct' else f"Barcode ({barcode_to_check['data']}) dimensions invalid. Found: W={barcode_to_check['measured_width_mm']:.2f}mm, H={barcode_to_check['measured_height_mm']:.2f}mm"
                 
                 highlights.append(api_schemas.HighlightedElement(
-                    rule_id_ref=rule_id_ref,
-                    bounding_box=barcode_to_check['bounding_box'],
-                    status=status,
-                    message=message,
+                    rule_id_ref=rule_id_ref, bounding_box=barcode_to_check['bounding_box'],
+                    status=status, message=message,
                     expected_value=f"W:{condition.expected_width_mm}mm, H:{condition.expected_height_mm}mm"
                 ))
 
-            # Other rules like FONT_SIZE can be filled in with similar logic
             else:
-                mismatches_count += 1 # Temporarily count unimplemented rules as mismatches
+                mismatches_count += 1
                 faults_without_highlights.append(f"Rule type '{condition.type.value}' for '{condition.target_element_description}' not fully implemented.")
-
 
         except Exception as e:
             logger.error(f"Error processing rule '{rule_id_ref}': {e}", exc_info=True)
@@ -137,18 +142,13 @@ async def process_label_analysis_sync(
     # --- Construct Final Result ---
     overall_status = "pass" if mismatches_count == 0 else "fail_minor"
     summary = {
-        "total_rules_defined": len(ruleset.conditions),
-        "matches": matches_count,
-        "mismatches_or_errors_in_rules": mismatches_count,
-        "faults_without_highlights": faults_without_highlights
+        "total_rules_defined": len(ruleset.conditions), "matches": matches_count,
+        "mismatches_or_errors_in_rules": mismatches_count, "faults_without_highlights": faults_without_highlights
     }
 
     result_object = api_schemas.LabelAnalysisResult(
-        analysis_id=analysis_id,
-        original_filename=original_filename,
-        overall_status=overall_status,
-        summary=summary,
-        highlights=highlights,
+        analysis_id=analysis_id, original_filename=original_filename,
+        overall_status=overall_status, summary=summary, highlights=highlights,
         timestamp=datetime.datetime.now(datetime.timezone.utc).isoformat()
     )
 
@@ -158,15 +158,34 @@ async def process_label_analysis_sync(
         output_image_path = settings.UPLOADS_DIR / f"processed_{analysis_id}.png"
         await image_utils.draw_bounding_boxes_on_image(image_path, highlights, output_image_path)
         stored_image_path = await file_processing.store_processed_image(output_image_path, str(analysis_id))
-        processed_image_path_str = str(stored_image_path.relative_to(settings.STATIC_SERVED_DIR))
+        
+        # We need both the relative path for the DB and the full URL for the API response
+        relative_image_path = str(stored_image_path.relative_to(settings.STATIC_SERVED_DIR)).replace('\\', '/')
+        processed_image_path_str = relative_image_path
+        # --- NEW: Construct the full URL ---
+        # Assuming the server runs on http://localhost:8000
+        # In production, this base URL should come from a setting.
+        base_url = "http://localhost:8000" 
+        processed_image_full_url = f"{base_url}/static/{relative_image_path}"
+        
         await file_processing.cleanup_temp_file(output_image_path)
     except Exception as e:
         logger.error(f"Could not generate or save highlighted image for analysis {analysis_id}: {e}", exc_info=True)
 
+    result_object = api_schemas.LabelAnalysisResult(
+        analysis_id=analysis_id,
+        original_filename=original_filename,
+        overall_status=overall_status,
+        summary=summary,
+        highlights=highlights,
+        timestamp=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        # --- NEW: Add the full URL to the response object ---
+        processed_image_url=processed_image_full_url
+    )
+
     try:
         await crud_analysis.create_analysis(
-            result_data=result_object,
-            initial_ruleset=ruleset,
+            result_data=result_object, initial_ruleset=ruleset,
             processed_image_path=processed_image_path_str
         )
         logger.info(f"Successfully saved analysis result {analysis_id} to database.")

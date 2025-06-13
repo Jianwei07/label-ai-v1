@@ -25,7 +25,7 @@ import { Terminal } from "lucide-react";
 
 export default function Home() {
   const [imageFile, setImageFile] = useState<File | null>(null);
-  const [rulesFile, setRulesFile] = useState<File | null>(null); // <-- State for rules file
+  const [rulesFile, setRulesFile] = useState<File | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
 
   // State for the API call
@@ -38,15 +38,26 @@ export default function Home() {
     setImageFile(file);
     if (imageUrl) URL.revokeObjectURL(imageUrl);
     setImageUrl(URL.createObjectURL(file));
+    setAnalysisResult(null); // Clear previous results
   };
 
   const handleRulesUpload = (file: File) => {
     setRulesFile(file);
+    setAnalysisResult(null); // Clear previous results
+  };
+
+  const handleImageRemove = () => {
+    setImageFile(null);
+    if (imageUrl) URL.revokeObjectURL(imageUrl);
+    setImageUrl(null);
+  };
+
+  const handleRulesRemove = () => {
+    setRulesFile(null);
   };
 
   const handleSubmit = async () => {
     if (!imageFile || !rulesFile) {
-      // Check for both files
       setError("Please provide both a label image and a rules document.");
       return;
     }
@@ -56,7 +67,6 @@ export default function Home() {
     setAnalysisResult(null);
 
     try {
-      // The api function now expects a File object for the rules
       const result = await submitLabelForAnalysis(imageFile, rulesFile, 50);
       setAnalysisResult(result);
       toast.success("Analysis Complete", {
@@ -77,8 +87,8 @@ export default function Home() {
   };
 
   return (
-    <main className="flex min-h-screen flex-col items-center p-4 md:p-12 lg:p-24 bg-gray-50 dark:bg-gray-900">
-      <div className="w-full max-w-6xl space-y-8">
+    <main className="flex min-h-screen flex-col items-center p-4 sm:p-8 md:p-12 bg-gray-50 dark:bg-gray-900">
+      <div className="w-full max-w-4xl space-y-8">
         <header className="text-center">
           <h1 className="text-4xl font-bold tracking-tight text-gray-900 dark:text-gray-50">
             AI Regulatory Label Checker
@@ -89,67 +99,67 @@ export default function Home() {
           </p>
         </header>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Input Section */}
+        {/* --- UPDATED: Single-column layout --- */}
+        <div className="flex flex-col gap-8">
+          {/* Step 1: Upload */}
           <Card>
             <CardHeader>
-              <CardTitle>1. Upload Your Files</CardTitle>
+              <CardTitle>Step 1: Upload Your Files</CardTitle>
               <CardDescription>
                 Provide the label image and the rules document.
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-6">
-              <div>
-                <label className="text-sm font-medium mb-2 block">
-                  Label Image
-                </label>
-                <ImageUploader
-                  onFileSelect={handleImageUpload}
-                  currentImageUrl={imageUrl}
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium mb-2 block">
-                  Rules Document
-                </label>
-                <RulesUploader
-                  onFileSelect={handleRulesUpload}
-                  currentFile={rulesFile}
-                />
-              </div>
-              <Button
-                onClick={handleSubmit}
-                disabled={isLoading || !imageFile || !rulesFile}
-                className="w-full"
-              >
-                {isLoading ? "Analyzing..." : "Analyze Label"}
-              </Button>
-            </CardContent>
-          </Card>
-
-          {/* Results Section */}
-          <Card>
-            <CardHeader>
-              <CardTitle>2. Analysis Results</CardTitle>
-              <CardDescription>
-                Highlights will appear on your image below.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {error && (
-                <Alert variant="destructive">
-                  <Terminal className="h-4 w-4" />
-                  <AlertTitle>Error</AlertTitle>
-                  <AlertDescription>{error}</AlertDescription>
-                </Alert>
-              )}
-              <AnalysisResultDisplay
-                imageUrl={imageUrl}
-                result={analysisResult}
-                isLoading={isLoading}
+            <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <ImageUploader
+                onFileSelect={handleImageUpload}
+                currentImageUrl={imageUrl}
+                onFileRemove={handleImageRemove}
+              />
+              <RulesUploader
+                onFileSelect={handleRulesUpload}
+                currentFile={rulesFile}
+                onFileRemove={handleRulesRemove}
               />
             </CardContent>
           </Card>
+
+          <div className="flex justify-center">
+            <Button
+              onClick={handleSubmit}
+              disabled={isLoading || !imageFile || !rulesFile}
+              size="lg"
+            >
+              {isLoading ? "Analyzing..." : "Analyze Label"}
+            </Button>
+          </div>
+
+          {/* Step 2: Results - This section only shows up after an analysis is attempted */}
+          {(isLoading || analysisResult || error) && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Step 2: Analysis Results</CardTitle>
+                <CardDescription>
+                  Review the highlighted faults and successes on your label.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {error && (
+                  <Alert variant="destructive">
+                    <Terminal className="h-4 w-4" />
+                    <AlertTitle>Error</AlertTitle>
+                    <AlertDescription>{error}</AlertDescription>
+                  </Alert>
+                )}
+                <AnalysisResultDisplay
+                  // We pass BOTH the original blob URL (for instant preview)
+                  // AND the final result object which contains the processed URL
+                  initialImageUrl={imageUrl}
+                  result={analysisResult}
+                  isLoading={isLoading}
+                />
+              </CardContent>
+            </Card>
+          )}
         </div>
       </div>
       <Toaster />

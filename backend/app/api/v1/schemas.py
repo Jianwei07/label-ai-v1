@@ -138,3 +138,6 @@ class RuleSetUpdate(BaseModel):
 class RuleSetInDB(RuleSet):
     # Potentially add created_at, updated_at fields if storing in DB
     pass
+
+# --- ADDED THIS FIELD ---
+    processed_image_url: Optional[HttpUrl] = Field(None, description="URL to the label image with highlights drawn on it.")
