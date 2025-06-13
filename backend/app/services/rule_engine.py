@@ -14,7 +14,12 @@ from app.services import file_processing as file_processing
 
 logger = logging.getLogger(settings.APP_NAME)
 
-# Helper to create a fault highlight when the location is unknown
+# --- THRESHOLDS FOR SMART MATCHING ---
+# These can be tuned later or even made part of the request's sensitivity.
+PERFECT_MATCH_THRESHOLD = 0.98
+NEAR_MATCH_THRESHOLD = 0.85
+MINIMUM_SIMILARITY_TO_CONSIDER = 0.60
+
 def _create_generic_fault_highlight(rule_id_ref: str, message: str) -> api_schemas.HighlightedElement:
     """Creates a small red box in the top-left corner for faults without a specific location."""
     return api_schemas.HighlightedElement(
@@ -22,7 +27,7 @@ def _create_generic_fault_highlight(rule_id_ref: str, message: str) -> api_schem
         bounding_box=api_schemas.BoundingBox(x=5, y=5, width=20, height=20),
         status="wrong",
         message=message,
-        found_value="Not Applicable",
+        found_value="Not Found",
         expected_value="Varies per rule",
     )
 
@@ -35,73 +40,83 @@ async def process_label_analysis_sync(
     original_filename: str
 ) -> api_schemas.LabelAnalysisResult:
     """
-    Orchestrates the entire label analysis, and now saves the result to the database.
+    Orchestrates the label analysis with smarter text matching logic.
     """
     logger.info(f"Starting analysis (ID: {analysis_id}) for image: {image_path.name}")
     
     highlights: List[api_schemas.HighlightedElement] = []
-    faults_without_highlights: List[str] = [] # This list is for logging, not highlights
+    faults_without_highlights: List[str] = []
     matches_count = 0
     mismatches_count = 0
 
     all_ocr_data = await ocr.extract_text_from_image(image_path)
     detected_barcodes = await visual_analysis.detect_and_measure_barcode(image_path)
 
+    # --- NEW: Reconstruct text blocks before checking rules ---
+    reconstructed_text_blocks = text_utils.reconstruct_text_blocks(all_ocr_data)
+    # Combine original OCR segments with reconstructed blocks for a comprehensive search
+    searchable_text_items = all_ocr_data + reconstructed_text_blocks
+
     for i, condition in enumerate(ruleset.conditions):
         rule_id_ref = f"rule_{i+1}_{condition.type.value}"
         
         try:
             if condition.type == api_schemas.RuleType.EXACT_TEXT_MATCH:
-                found_match = False
                 if not condition.expected_text: continue
-                
-                # --- NEW: More robust text matching logic ---
-                # First, try to find a perfect match directly
-                for ocr_item in all_ocr_data:
-                    if text_utils.compare_text_exactly(ocr_item.text, condition.expected_text, case_sensitive=condition.case_sensitive):
-                        highlights.append(api_schemas.HighlightedElement(
-                            rule_id_ref=rule_id_ref,
-                            bounding_box=api_schemas.BoundingBox(x=ocr_item.left, y=ocr_item.top, width=ocr_item.width, height=ocr_item.height),
-                            status="correct", message=f"Found expected text: '{condition.expected_text}'",
-                            found_value=ocr_item.text, expected_value=condition.expected_text,
-                        ))
-                        matches_count += 1
-                        found_match = True
-                        break
-                if found_match: continue
 
-                # If no perfect match, search for near matches to highlight as faults
-                normalized_expected = text_utils.normalize_text(condition.expected_text, case_sensitive=False)
-                for ocr_item in all_ocr_data:
-                    normalized_ocr = text_utils.normalize_text(ocr_item.text, case_sensitive=False)
-                    if normalized_expected in normalized_ocr or normalized_ocr in normalized_expected:
-                        highlights.append(api_schemas.HighlightedElement(
-                            rule_id_ref=rule_id_ref,
-                            bounding_box=api_schemas.BoundingBox(x=ocr_item.left, y=ocr_item.top, width=ocr_item.width, height=ocr_item.height),
-                            status="wrong", message=f"Found text '{ocr_item.text}', but not an exact match for '{condition.expected_text}'.",
-                            found_value=ocr_item.text, expected_value=condition.expected_text,
-                        ))
-                        mismatches_count += 1
-                        found_match = True
-                        break
-                
-                if not found_match:
+                best_match_score = 0
+                best_match_item = None
+
+                # Find the best possible match for the rule in all searchable items
+                for item in searchable_text_items:
+                    score = text_utils.get_text_similarity_ratio(condition.expected_text, item.text)
+                    if score > best_match_score:
+                        best_match_score = score
+                        best_match_item = item
+
+                # Now, evaluate the best match found
+                if best_match_score >= PERFECT_MATCH_THRESHOLD:
+                    highlights.append(api_schemas.HighlightedElement(
+                        rule_id_ref=rule_id_ref,
+                        bounding_box=api_schemas.BoundingBox(x=best_match_item.left, y=best_match_item.top, width=best_match_item.width, height=best_match_item.height),
+                        status="correct", message=f"Found expected text: '{condition.expected_text}'",
+                        found_value=best_match_item.text, expected_value=condition.expected_text
+                    ))
+                    matches_count += 1
+                elif best_match_score >= NEAR_MATCH_THRESHOLD:
+                    highlights.append(api_schemas.HighlightedElement(
+                        rule_id_ref=rule_id_ref,
+                        bounding_box=api_schemas.BoundingBox(x=best_match_item.left, y=best_match_item.top, width=best_match_item.width, height=best_match_item.height),
+                        status="wrong", message=f"Found text '{best_match_item.text}', but it's not an exact match for '{condition.expected_text}'. (Similarity: {best_match_score:.0%})",
+                        found_value=best_match_item.text, expected_value=condition.expected_text
+                    ))
+                    mismatches_count += 1
+                elif best_match_score < MINIMUM_SIMILARITY_TO_CONSIDER:
                     mismatches_count += 1
                     fault_message = f"Missing required text: '{condition.expected_text}'"
                     faults_without_highlights.append(fault_message)
                     highlights.append(_create_generic_fault_highlight(rule_id_ref, fault_message))
-
+                else:
+                    mismatches_count += 1
+                    highlights.append(api_schemas.HighlightedElement(
+                        rule_id_ref=rule_id_ref,
+                        bounding_box=api_schemas.BoundingBox(x=best_match_item.left, y=best_match_item.top, width=best_match_item.width, height=best_match_item.height),
+                        status="wrong", message=f"Found text with low similarity: '{best_match_item.text}' for expected text '{condition.expected_text}'. (Similarity: {best_match_score:.0%})",
+                        found_value=best_match_item.text, expected_value=condition.expected_text
+                    ))
+            
+            # --- This is the placeholder logic from your file, which we can fill in next ---
+            elif condition.type == api_schemas.RuleType.FONT_SIZE:
+                 mismatches_count += 1
+                 faults_without_highlights.append(f"Rule type '{condition.type.value}' for '{condition.target_element_description}' not fully implemented.")
 
             elif condition.type == api_schemas.RuleType.BARCODE_DIMENSIONS:
                 if not detected_barcodes:
                     mismatches_count += 1
                     highlights.append(_create_generic_fault_highlight(rule_id_ref, "No barcode detected on label to check dimensions."))
                     continue
-                
-                # --- NEW: Logic to find the correct barcode number from the ruleset ---
-                # Find the corresponding text match rule to get the barcode number
+
                 barcode_number_rule = next((r for r in ruleset.conditions if r.type == api_schemas.RuleType.EXACT_TEXT_MATCH and r.target_element_description == condition.target_element_description), None)
-                
                 if not barcode_number_rule or not barcode_number_rule.expected_text:
                     mismatches_count += 1
                     highlights.append(_create_generic_fault_highlight(rule_id_ref, f"Could not find barcode number in rules for '{condition.target_element_description}'."))
@@ -146,25 +161,16 @@ async def process_label_analysis_sync(
         "mismatches_or_errors_in_rules": mismatches_count, "faults_without_highlights": faults_without_highlights
     }
 
-    result_object = api_schemas.LabelAnalysisResult(
-        analysis_id=analysis_id, original_filename=original_filename,
-        overall_status=overall_status, summary=summary, highlights=highlights,
-        timestamp=datetime.datetime.now(datetime.timezone.utc).isoformat()
-    )
-
-    # --- Save evidence to persistent storage ---
+    processed_image_full_url = None
     processed_image_path_str = None
     try:
         output_image_path = settings.UPLOADS_DIR / f"processed_{analysis_id}.png"
         await image_utils.draw_bounding_boxes_on_image(image_path, highlights, output_image_path)
         stored_image_path = await file_processing.store_processed_image(output_image_path, str(analysis_id))
         
-        # We need both the relative path for the DB and the full URL for the API response
         relative_image_path = str(stored_image_path.relative_to(settings.STATIC_SERVED_DIR)).replace('\\', '/')
         processed_image_path_str = relative_image_path
-        # --- NEW: Construct the full URL ---
-        # Assuming the server runs on http://localhost:8000
-        # In production, this base URL should come from a setting.
+        
         base_url = "http://localhost:8000" 
         processed_image_full_url = f"{base_url}/static/{relative_image_path}"
         
@@ -179,7 +185,6 @@ async def process_label_analysis_sync(
         summary=summary,
         highlights=highlights,
         timestamp=datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        # --- NEW: Add the full URL to the response object ---
         processed_image_url=processed_image_full_url
     )
 
